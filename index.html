@@ -466,6 +466,8 @@
     .about{margin:0 16px 36px;}
   }
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -547,6 +549,30 @@ const ORDERS_KEY = 'helwip-orders';
 const ACCOUNTS_KEY = 'helwip-accounts';
 const ADMIN_EMAILS = ['shevchenko.myrosia@gmail.com', 'shevchenko.tusia@gmail.com'];
 
+// ---------- Firebase (справжня база даних, працює на будь-якому хостингу) ----------
+const firebaseConfig = {
+  apiKey: "AIzaSyDoE8kEXqqBnqIo92MQ5R7e36OTbyc_1Fk",
+  authDomain: "helwip.firebaseapp.com",
+  projectId: "helwip",
+  storageBucket: "helwip.firebasestorage.app",
+  messagingSenderId: "947863318055",
+  appId: "1:947863318055:web:5dc455813bbeaf79086802",
+  measurementId: "G-2JCLYW5GWD"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const FB_COLLECTION = 'helwip-store';
+
+async function fbGetJson(key){
+  const snap = await db.collection(FB_COLLECTION).doc(key).get();
+  if(snap.exists && snap.data() && snap.data().json !== undefined) return snap.data().json;
+  return null;
+}
+
+async function fbSetJson(key, jsonStr){
+  await db.collection(FB_COLLECTION).doc(key).set({ json: jsonStr, updatedAt: Date.now() });
+}
+
 const defaultContent = {
   eyebrow: "офіційний мерч",
   heroTitle: 'Стань <span class="a">Богом</span> у <span class="b">Майнкрафті</span>',
@@ -570,9 +596,9 @@ let content = {...defaultContent};
 let products = [...defaultProducts];
 let cart = {};
 let orders = [];
-let siteVersion = null;
-let productsVersion = null;
-let ordersVersion = null;
+let lastSiteJson = null;
+let lastProductsJson = null;
+let lastOrdersJson = null;
 let editMode = false;
 let accounts = {};
 let currentUserEmail = null;
@@ -589,41 +615,39 @@ function showToast(msg){
 
 async function loadData(){
   try{
-    const s = await window.storage.get(SITE_KEY, true);
-    if(s && s.value){
-      content = {...defaultContent, ...JSON.parse(s.value)};
-      siteVersion = s.version || null;
+    const sJson = await fbGetJson(SITE_KEY);
+    if(sJson){
+      content = {...defaultContent, ...JSON.parse(sJson)};
+      lastSiteJson = sJson;
     } else {
       await saveSite(true);
     }
   }catch(e){
     console.log('site content not found, using defaults', e);
-    await saveSite(true);
   }
   try{
-    const p = await window.storage.get(PRODUCTS_KEY, true);
-    if(p && p.value){
-      products = JSON.parse(p.value);
-      productsVersion = p.version || null;
+    const pJson = await fbGetJson(PRODUCTS_KEY);
+    if(pJson){
+      products = JSON.parse(pJson);
+      lastProductsJson = pJson;
     } else {
       await saveProducts(true);
     }
   }catch(e){
     console.log('products not found, using defaults', e);
-    await saveProducts(true);
   }
   try{
-    const o = await window.storage.get(ORDERS_KEY, true);
-    if(o && o.value){
-      orders = JSON.parse(o.value);
-      ordersVersion = o.version || null;
+    const oJson = await fbGetJson(ORDERS_KEY);
+    if(oJson){
+      orders = JSON.parse(oJson);
+      lastOrdersJson = oJson;
     }
   }catch(e){
     console.log('no orders yet', e);
   }
   try{
-    const acc = await window.storage.get(ACCOUNTS_KEY, true);
-    if(acc && acc.value) accounts = JSON.parse(acc.value);
+    const accJson = await fbGetJson(ACCOUNTS_KEY);
+    if(accJson) accounts = JSON.parse(accJson);
   }catch(e){
     console.log('no accounts registered yet', e);
   }
@@ -633,8 +657,8 @@ async function loadData(){
 
 async function saveSite(silent){
   try{
-    const res = await window.storage.set(SITE_KEY, JSON.stringify(content), true);
-    if(res) siteVersion = res.version || siteVersion;
+    lastSiteJson = JSON.stringify(content);
+    await fbSetJson(SITE_KEY, lastSiteJson);
     if(!silent) showToast('Збережено ✔');
   }catch(e){
     console.error('save site failed', e);
@@ -644,8 +668,8 @@ async function saveSite(silent){
 
 async function saveProducts(silent){
   try{
-    const res = await window.storage.set(PRODUCTS_KEY, JSON.stringify(products), true);
-    if(res) productsVersion = res.version || productsVersion;
+    lastProductsJson = JSON.stringify(products);
+    await fbSetJson(PRODUCTS_KEY, lastProductsJson);
     if(!silent) showToast('Збережено ✔');
   }catch(e){
     console.error('save products failed', e);
@@ -655,8 +679,8 @@ async function saveProducts(silent){
 
 async function saveOrders(silent){
   try{
-    const res = await window.storage.set(ORDERS_KEY, JSON.stringify(orders), true);
-    if(res) ordersVersion = res.version || ordersVersion;
+    lastOrdersJson = JSON.stringify(orders);
+    await fbSetJson(ORDERS_KEY, lastOrdersJson);
     if(!silent) showToast('Збережено ✔');
   }catch(e){
     console.error('save orders failed', e);
@@ -1254,7 +1278,7 @@ async function doRegister(){
   if(!p1 || p1.length < 4){ showToast('Пароль має містити хоча б 4 символи'); return; }
   if(p1 !== p2){ showToast('Паролі не співпадають'); return; }
   accounts[email] = simpleHash(email + '::' + p1);
-  try{ await window.storage.set(ACCOUNTS_KEY, JSON.stringify(accounts), true); }catch(e){}
+  try{ await fbSetJson(ACCOUNTS_KEY, JSON.stringify(accounts)); }catch(e){}
   showToast('Акаунт створено. Підтвердіть вхід кодом.');
   beginTwoFactor(email);
 }
@@ -1338,7 +1362,7 @@ async function changeMyPassword(){
   if(!a || a.length < 4){ showToast('Новий пароль занадто короткий'); return; }
   if(a !== b){ showToast('Паролі не співпадають'); return; }
   accounts[currentUserEmail] = simpleHash(currentUserEmail + '::' + a);
-  try{ await window.storage.set(ACCOUNTS_KEY, JSON.stringify(accounts), true); }catch(e){}
+  try{ await fbSetJson(ACCOUNTS_KEY, JSON.stringify(accounts)); }catch(e){}
   closeModal();
   showToast('Пароль змінено ✔');
 }
@@ -1411,26 +1435,26 @@ function deleteOrder(id){
 setInterval(async ()=>{
   if(editMode) return;
   try{
-    const s = await window.storage.get(SITE_KEY, true);
-    if(s && s.value && s.version !== siteVersion){
-      content = {...defaultContent, ...JSON.parse(s.value)};
-      siteVersion = s.version;
+    const sJson = await fbGetJson(SITE_KEY);
+    if(sJson && sJson !== lastSiteJson){
+      content = {...defaultContent, ...JSON.parse(sJson)};
+      lastSiteJson = sJson;
       renderAll();
     }
   }catch(e){}
   try{
-    const p = await window.storage.get(PRODUCTS_KEY, true);
-    if(p && p.value && p.version !== productsVersion){
-      products = JSON.parse(p.value);
-      productsVersion = p.version;
+    const pJson = await fbGetJson(PRODUCTS_KEY);
+    if(pJson && pJson !== lastProductsJson){
+      products = JSON.parse(pJson);
+      lastProductsJson = pJson;
       renderProducts();
     }
   }catch(e){}
   try{
-    const o = await window.storage.get(ORDERS_KEY, true);
-    if(o && o.value && o.version !== ordersVersion){
-      orders = JSON.parse(o.value);
-      ordersVersion = o.version;
+    const oJson = await fbGetJson(ORDERS_KEY);
+    if(oJson && oJson !== lastOrdersJson){
+      orders = JSON.parse(oJson);
+      lastOrdersJson = oJson;
     }
   }catch(e){}
 }, 6000);
