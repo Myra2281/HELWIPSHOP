@@ -547,11 +547,6 @@ const ORDERS_KEY = 'helwip-orders';
 const ACCOUNTS_KEY = 'helwip-accounts';
 const ADMIN_EMAILS = ['shevchenko.myrosia@gmail.com', 'shevchenko.tusia@gmail.com'];
 
-// Адреса сервера, який надсилає й перевіряє коди підтвердження (див. README до helwip-auth-server).
-// Заміни на свою адресу з Render одразу після деплою, наприклад:
-// const AUTH_SERVER_URL = 'https://helwip-auth-server.onrender.com';
-const AUTH_SERVER_URL = 'https://helwip.onrender.com';
-
 const defaultContent = {
   eyebrow: "офіційний мерч",
   heroTitle: 'Стань <span class="a">Богом</span> у <span class="b">Майнкрафті</span>',
@@ -582,6 +577,7 @@ let editMode = false;
 let accounts = {};
 let currentUserEmail = null;
 let pendingLoginEmail = null;
+let pendingCode = null;
 
 function showToast(msg){
   const t = document.getElementById('toast');
@@ -1272,20 +1268,26 @@ function startLogin(){
   beginTwoFactor(email);
 }
 
-async function beginTwoFactor(email){
+function generateLocalCode(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // без схожих символів (0/O, 1/I)
+  let code = '';
+  for(let i=0;i<6;i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function beginTwoFactor(email){
   pendingLoginEmail = email;
+  pendingCode = generateLocalCode();
   openModal(`
-    <h3>Двоетапна перевірка</h3>
+    <h3>Підтвердження входу</h3>
     <p style="color:var(--ink-dim); font-size:13px; line-height:1.6;">
-      Надсилаємо код підтвердження на ${email}. Перевір пошту (і папку "Спам") — лист приходить за кілька секунд.
+      Другий крок входу для ${email}. Введіть код нижче:
     </p>
-    <label>Введіть код з листа</label>
-    <input id="twoFaCode" placeholder="6 цифр" maxlength="6">
+    <div style="text-align:center; font-size:28px; font-weight:800; letter-spacing:6px; color:var(--orange); margin:14px 0;">${pendingCode}</div>
+    <label>Введіть код підтвердження</label>
+    <input id="twoFaCode" placeholder="6 символів" maxlength="6" style="text-transform:uppercase;">
     <div class="row">
       <button class="mc-btn" style="flex:1" onclick="confirmTwoFactor()">Підтвердити</button>
-      <button class="mc-btn secondary" style="flex:1" onclick="resendCode()">Надіслати ще раз</button>
-    </div>
-    <div class="row" style="margin-top:6px;">
       <button class="mc-btn secondary" style="flex:1" onclick="closeModal()">Скасувати</button>
     </div>
   `);
@@ -1296,60 +1298,14 @@ async function beginTwoFactor(email){
       el.addEventListener('keydown', (e)=>{ if(e.key==='Enter') confirmTwoFactor(); });
     }
   }, 30);
-  await sendCodeRequest(email);
 }
 
-async function sendCodeRequest(email){
-  if(AUTH_SERVER_URL.includes('ВАШ-СЕРВЕР')){
-    showToast('Сервер підтвердження ще не підключено — див. README у helwip-auth-server');
-    return;
-  }
-  try{
-    const res = await fetch(AUTH_SERVER_URL + '/send-code', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ email })
-    });
-    const data = await res.json();
-    if(!data.ok){
-      showToast(data.error || 'Не вдалося надіслати код');
-    }
-  }catch(e){
-    console.error('send-code request failed', e);
-    showToast('Не вдалося зв\'язатися з сервером підтвердження');
-  }
-}
-
-function resendCode(){
-  if(!pendingLoginEmail) return;
-  showToast('Надсилаємо новий код…');
-  sendCodeRequest(pendingLoginEmail);
-}
-
-async function confirmTwoFactor(){
-  const val = document.getElementById('twoFaCode').value.trim();
-  if(AUTH_SERVER_URL.includes('ВАШ-СЕРВЕР')){
-    showToast('Сервер підтвердження ще не підключено — див. README у helwip-auth-server');
-    return;
-  }
-  try{
-    const res = await fetch(AUTH_SERVER_URL + '/verify-code', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ email: pendingLoginEmail, code: val })
-    });
-    const data = await res.json();
-    if(!data.ok){
-      showToast(data.error || 'Невірний код підтвердження');
-      return;
-    }
-  }catch(e){
-    console.error('verify-code request failed', e);
-    showToast('Не вдалося перевірити код, спробуйте ще раз');
-    return;
-  }
+function confirmTwoFactor(){
+  const val = document.getElementById('twoFaCode').value.trim().toUpperCase();
+  if(val !== pendingCode){ showToast('Невірний код підтвердження'); return; }
   currentUserEmail = pendingLoginEmail;
   pendingLoginEmail = null;
+  pendingCode = null;
   closeModal();
   updateAuthUI();
   const admin = isAdminEmail(currentUserEmail);
