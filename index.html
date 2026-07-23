@@ -559,6 +559,38 @@ const ORDERS_KEY = 'helwip-orders';
 const ACCOUNTS_KEY = 'helwip-accounts';
 const ADMIN_EMAILS = ['shevchenko.myrosia@gmail.com', 'shevchenko.tusia@gmail.com'];
 
+// Telegram-сповіщення про нові замовлення (заповниш після налаштування бота)
+const TELEGRAM_BOT_TOKEN = '8968818680:AAFbZwRe_xyAVKzihxvmcrqL1Sm8xJdFLmc';
+const TELEGRAM_CHAT_ID = '8968818680';
+
+async function sendTelegramNotification(order){
+  if(TELEGRAM_BOT_TOKEN.includes('ВАШ_ТОКЕН') || TELEGRAM_CHAT_ID.includes('ВАШ_CHAT_ID')){
+    console.log('Telegram-сповіщення не налаштовано — див. інструкцію');
+    return;
+  }
+  const itemsText = order.items
+    .map(it => `• ${it.name}${it.size ? ' (' + it.size + ')' : ''} × ${it.qty} — ${it.price * it.qty} грн`)
+    .join('\n');
+  const text =
+    `🛒 Нове замовлення на Helwip Merch!\n\n` +
+    `👤 ${order.name}\n` +
+    `📞 ${order.phone}\n` +
+    `📦 ${order.carrier || '—'}, ${order.city || '—'}, відділення ${order.branch || '—'}\n` +
+    (order.comment ? `💬 ${order.comment}\n` : '') +
+    `\n${itemsText}\n\n` +
+    `💰 Разом: ${order.total} грн`;
+
+  try{
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text })
+    });
+  }catch(e){
+    console.error('Не вдалося надіслати сповіщення в Telegram', e);
+  }
+}
+
 // ---------- Firebase (справжня база даних, працює на будь-якому хостингу) ----------
 const firebaseConfig = {
   apiKey: "AIzaSyDoE8kEXqqBnqIo92MQ5R7e36OTbyc_1Fk",
@@ -1014,6 +1046,7 @@ function submitOrder(){
 
   orders.unshift(order);
   saveOrders(true);
+  sendTelegramNotification(order);
 
   cart = {};
   renderCartFab();
